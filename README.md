@@ -1,1 +1,1 @@
-# gitlab-ci-feature-stage-example
+Пример для канала https://t.me/DevOpsologist

@@ -1,0 +1,51 @@
+stages:
+    - deploy-feature-stage
+
+.feature_stage_prepare: &feature_stage_prepare
+    - cp .env.local.stage .env.local
+    - echo "FEATURE_ENV_HOST=${FEATURE_ENV_HOST}" >> .env.local
+    - echo "DB_HOST=db-${FEATURE_ENV_HOST}" >> .env.local
+    - echo "DB_USER=feature-stage" >> .env.local
+    - echo "DB_PASSWORD=${POSTGRES_STAGE_PASSWORD}" >> .env.local
+    - echo "POSTGRES_STAGE_PASSWORD=${POSTGRES_STAGE_PASSWORD}" >> .env.local
+    - sed -i "s/db:/db-${FEATURE_ENV_HOST}:/" docker-compose-feature-stage.yaml
+    - sed -i "s/php:/php-${FEATURE_ENV_HOST}:/" docker-compose-feature-stage.yaml
+
+deploy-feature-stage:
+    stage: deploy-feature-stage
+    before_script:
+        - docker --config config-${CI_JOB_ID} login -u ${CI_REGISTRY_USER} -p ${CI_REGISTRY_PASSWORD} ${CI_REGISTRY}
+        - FEATURE_ENV_HOST=${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}
+        - FEATURE_ENV_HOST=`echo ${FEATURE_ENV_HOST} | tr '[:upper:]' '[:lower:]'`
+        - *feature_stage_prepare
+    after_script:
+        - rm .env.local
+        - docker --config config-${CI_JOB_ID} logout ${CI_REGISTRY}
+    script:
+        - make build-stage-image
+        - make push-stage-image
+        - make deploy-feature-stage
+    when: manual
+    only:
+        - merge_requests
+    environment:
+        name: feature-stage/$CI_COMMIT_REF_SLUG
+        on_stop: stop-feature-stage
+    tags:
+        - example
+
+stop-feature-stage:
+    stage: deploy-feature-stage
+    before_script:
+        - FEATURE_ENV_HOST=${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}
+        - FEATURE_ENV_HOST=`echo ${FEATURE_ENV_HOST} | tr '[:upper:]' '[:lower:]'`
+    script:
+        - FEATURE_ENV_HOST=${FEATURE_ENV_HOST} make stop-feature-stage
+    when: manual
+    only:
+        - merge_requests
+    environment:
+        name: feature-stage/$CI_COMMIT_REF_SLUG
+        action: stop
+    tags:
+        - example
