@@ -1,5 +1,6 @@
 stages:
     - deploy-feature-stage
+    - deploy-feature-stage-frontend
 
 .feature_stage_prepare: &feature_stage_prepare
     - cp .env.local.stage .env.local
@@ -11,11 +12,23 @@ stages:
     - sed -i "s/db:/db-${FEATURE_ENV_HOST}:/" docker-compose-feature-stage.yaml
     - sed -i "s/php:/php-${FEATURE_ENV_HOST}:/" docker-compose-feature-stage.yaml
 
+.downstream_env_vars: &downstream_env_vars
+    UPSTREAM_ENVIRONMENT_ACTION: $CI_ENVIRONMENT_ACTION
+    FEATURE_ENV_HOST: ${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}
+
+.downstream-feature-stage-frontend:
+    variables:
+      *downstream_env_vars
+    trigger:
+        project: frontend/frontend-app
+        branch: main
+        strategy: depend
+
 deploy-feature-stage:
     stage: deploy-feature-stage
     before_script:
         - docker --config config-${CI_JOB_ID} login -u ${CI_REGISTRY_USER} -p ${CI_REGISTRY_PASSWORD} ${CI_REGISTRY}
-        - FEATURE_ENV_HOST=${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}
+        - if [[ ${CI_MERGE_REQUEST_MILESTONE} == "" ]]; then FEATURE_ENV_HOST=${CI_MERGE_REQUEST_SOURCE_BRANCH_NAME}; else FEATURE_ENV_HOST=${CI_MERGE_REQUEST_MILESTONE}; fi
         - FEATURE_ENV_HOST=`echo ${FEATURE_ENV_HOST} | tr '[:upper:]' '[:lower:]'`
         - *feature_stage_prepare
     after_script:
@@ -47,5 +60,44 @@ stop-feature-stage:
     environment:
         name: feature-stage/$CI_COMMIT_REF_SLUG
         action: stop
+    tags:
+        - example
+
+deploy-feature-stage-frontend:
+    stage: deploy-feature-stage-frontend
+    extends: .downstream-feature-stage-frontend
+    environment:
+        name: feature-stage-frontend/$CI_COMMIT_REF_SLUG
+        on_stop: stop-feature-stage-frontend
+    when: manual
+    only:
+        - merge_requests
+
+stop-feature-stage-frontend:
+    stage: stop-feature-stage-frontend
+    extends: .downstream-feature-stage-frontend
+    environment:
+        name: feature-stage-frontend/$CI_COMMIT_REF_SLUG
+        action: stop
+    when: manual
+    only:
+        - merge_requests
+
+deploy-master-feature-stage:
+    stage: deploy-feature-stage
+    before_script:
+        - docker --config config-${CI_JOB_ID} login -u ${CI_REGISTRY_USER} -p ${CI_REGISTRY_PASSWORD} ${CI_REGISTRY}
+        - FEATURE_ENV_HOST=master
+        - *feature_stage_prepare
+    after_script:
+        - rm .env.local
+        - docker --config config-${CI_JOB_ID} logout ${CI_REGISTRY}
+    script:
+        - make build-stage-image
+        - make push-stage-image
+        - make deploy-feature-stage
+    when: on_success
+    only:
+        - master
     tags:
         - example
